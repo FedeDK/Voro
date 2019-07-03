@@ -13,10 +13,10 @@ from astropy.table import Table
 import pyvoro
 from nbodykit.lab import *
 
-recenter = 'no'
+recenter = 'yes'
 volumize = 'yes'
 periodicVoro = 'no'
-smooth = .1 #se usa en el volumizado 
+smooth = .25 #se usa en el volumizado 
 
 niter=100
 
@@ -100,7 +100,9 @@ for _ in range(niter):
                 
                 dr = np.linalg.norm(dist)-msep
                 
-                if np.linalg.norm(dist)==0.: print 'Dist es 0!'
+                if np.linalg.norm(dist)==0.: 
+                    print 'Dist es 0! i:',i,' j:',j
+                    continue
                 
                 #if dr<0.: neg+=1
                 #if dr>0.: pos+=1
@@ -238,8 +240,9 @@ plt.hlines(1., Pk1['k'][0],Pk2['k'][-1], colors='k',linestyles=':')
 plt.legend()
 plt.show()
 
-plt.plot(range(niter),norm,label=r'$\Delta r$')
-plt.yscale('log')
-plt.xscale('log')
-plt.legend()
-plt.show()
+#if volumize=='yes':
+#    plt.plot(range(niter),norm,label=r'$\Delta r$')
+#    plt.yscale('log')
+#    plt.xscale('log')
+#    plt.legend()
+#    plt.show()
