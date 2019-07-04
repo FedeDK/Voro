@@ -13,13 +13,23 @@ from astropy.table import Table
 import pyvoro
 from nbodykit.lab import *
 
-niter=25
+recenter = True
+volumize = False
+periodicVoro = False
+smooth = .25 #se usa en el volumizado 
+
+niter=200
 
 nd = 3
 nran = 16**3
 bs = 1500
 msep = (bs**nd/nran)**(1./nd)
-smooth = .1
+
+dk = 0.007
+
+#TEST multiplico la separacion media para usarla en la teselacion Voronoi
+msep *= np.sqrt(2)
+
 
 rbar = (3.*bs**nd/(4.*np.pi*nran))**(1./3)
 
@@ -27,21 +37,22 @@ rbar = (3.*bs**nd/(4.*np.pi*nran))**(1./3)
 #rbar = 0.
 #rbar = msep
 
-
+np.random.seed(2022342)
 ranpoints = bs*np.random.uniform(size=(nran,nd))
 
 limits = [[0.,bs],[0.,bs],[0.,bs]]
 
 points1 = ranpoints[np.where(ranpoints[:,2]<bs/10)]
 
-voro = pyvoro.compute_voronoi(ranpoints,limits,1.5*msep,periodic=[True,True,True])
+if periodicVoro==True: voro = pyvoro.compute_voronoi(ranpoints,limits,msep,periodic=[True,True,True])
+if periodicVoro==False: voro = pyvoro.compute_voronoi(ranpoints,limits,msep)
 
 dcat = ArrayCatalog(Table(ranpoints,names=['x','y','z']),BoxSize=bs)
 dcat['Position'] = transform.StackColumns(dcat['x'], dcat['y'], dcat['z'])
 
 print 'Calculating P(k) - Before'    
 real_mesh = dcat.to_mesh(compensated=True, window='tsc', position='Position', Nmesh=256)
-r = FFTPower(real_mesh, mode='1d',dk=0.005)
+r = FFTPower(real_mesh, mode='1d',dk=dk)
 Pk1 = r.power
 
 #t1 = time.time()
@@ -56,130 +67,97 @@ pos=0
 
 for _ in range(niter): 
     print _,'/',niter-1
+    if recenter==True:
+        #########
+        #RECENTER
+        #########    
+        meanx=[]
+        meany=[]
+        meanz=[]
 
-    #########
-    #RECENTER
-    #########    
-    meanx=[]
-    meany=[]
-    meanz=[]
-    
-    for i in range(nran):
-        vert=[(a[0],a[1],a[2]) for a in voro[i]['vertices']]
+        for i in range(nran):
+            vert=[(a[0],a[1],a[2]) for a in voro[i]['vertices']]
 
-        meanx.append( np.mean(np.array(vert)[:,0]) )
-        meany.append( np.mean(np.array(vert)[:,1]) )
-        meanz.append( np.mean(np.array(vert)[:,2]) )
+            meanx.append( np.mean(np.array(vert)[:,0]) )
+            meany.append( np.mean(np.array(vert)[:,1]) )
+            meanz.append( np.mean(np.array(vert)[:,2]) )
 
-    ranpoints = np.column_stack([meanx,meany,meanz])
+        ranpoints = np.column_stack([meanx,meany,meanz])
 
-    ranpoints[ranpoints>bs]-=bs
-    ranpoints[ranpoints<0.]+=bs
+        ranpoints[ranpoints>bs]-=bs
+        ranpoints[ranpoints<0.]+=bs
 
-    #########
-    #VOLUMIZE
-    #########
-    f_array = np.zeros(np.shape(ranpoints))
-    dr_array = np.zeros(np.shape(ranpoints))
-    for i in range(nran):
+    if volumize==True:
+        #########
+        #VOLUMIZE
+        #########
+        f_array = np.zeros(np.shape(ranpoints))
+        dr_array = np.zeros(np.shape(ranpoints))
+        for i in range(nran):
+
+            for face in voro[i]['faces']:
+                j = face['adjacent_cell']
+                if j==i: continue
+                dist = ranpoints[j]-ranpoints[i]
+                
+                dr = np.linalg.norm(dist)-msep
+                
+                if np.linalg.norm(dist)==0.: 
+                    print 'Dist es 0! i:',i,' j:',j
+                    continue
+                
+                #if dr<0.: neg+=1
+                #if dr>0.: pos+=1
+                #print dr
+                r_ij = dist/np.linalg.norm(dist)
+                #f_array[i] += smooth*dr*r_ij #lo reemplace por una sola f, para cambiar la posicion una por una
+                f = smooth*dr*r_ij
+                #print i,idx,dist,r_ij,dr_array[idx]
+
+            ranpoints[i] += f
+            if np.any(np.isnan(ranpoints[i]))==True:
+                print 'nan',i
             
-        for face in voro[i]['faces']:
-            j = face['adjacent_cell']
-            if j==i: continue
-            dist = ranpoints[j]-ranpoints[i]
-            
-            dr = np.linalg.norm(dist)-msep
-            if dr<0.: neg+=1
-            if dr>0.: pos+=1
-            #print dr
-            r_ij = dist/np.linalg.norm(dist)
-            f_array[i] += smooth*dr*r_ij
-            #print i,idx,dist,r_ij,dr_array[idx]
+            #voro = pyvoro.compute_voronoi(ranpoints,limits,msep)#,periodic=[True,True,True])
 
-    dr_array = f_array
-    norm[_] = np.mean(np.linalg.norm(dr_array,axis=1))
-    
-    ranpoints += dr_array
+        #dr_array = f_array
+        #norm[_] = np.mean(np.linalg.norm(dr_array,axis=1))
 
-    print 'Percentage of Out Of Box Particles:',(len(ranpoints[ranpoints>bs])+len(ranpoints[ranpoints<0.]))*100/len(ranpoints),'%'
+        #ranpoints += dr_array #lo reemplaze por el 'ranpoints[i] += f' mas arriba
 
-    ranpoints[ranpoints>bs]-=bs
-    ranpoints[ranpoints<0.]+=bs
+
+        print 'Percentage of Out Of Box Particles:',(len(ranpoints[ranpoints>bs])+len(ranpoints[ranpoints<0.]))*100/len(ranpoints),'%'
+
+        ranpoints[ranpoints>bs]-=bs
+        ranpoints[ranpoints<0.]+=bs
 
     
-    voro = pyvoro.compute_voronoi(ranpoints,limits,1.5*msep,periodic=[True,True,True])
+    if periodicVoro==True: voro = pyvoro.compute_voronoi(ranpoints,limits,msep,periodic=[True,True,True])
+    if periodicVoro==False: voro = pyvoro.compute_voronoi(ranpoints,limits,msep)
 
-
-
-
-
-
-
-
-#--------------------------------------------------
-#for _ in range(niter): 
-#    print _,'/',niter-1
-
-    #########
-    #RECENTER
-    #########    
-#    meanx=[]
-#    meany=[]
-#    meanz=[]
+#TESTING: One last recenter
+#meanx=[]
+#meany=[]
+#meanz=[]
     
-#    for i in range(nran):
-#        vert=[(a[0],a[1],a[2]) for a in voro[i]['vertices']]
+#for i in range(nran):
+#    vert=[(a[0],a[1],a[2]) for a in voro[i]['vertices']]
 
-#        meanx.append( np.mean(np.array(vert)[:,0]) )
-#        meany.append( np.mean(np.array(vert)[:,1]) )
-#        meanz.append( np.mean(np.array(vert)[:,2]) )
+#    meanx.append( np.mean(np.array(vert)[:,0]) )
+#    meany.append( np.mean(np.array(vert)[:,1]) )
+#    meanz.append( np.mean(np.array(vert)[:,2]) )
 
-#    ranpoints = np.column_stack([meanx,meany,meanz])
+#ranpoints = np.column_stack([meanx,meany,meanz])
 
-#    ranpoints[ranpoints>bs]-=bs
-#    ranpoints[ranpoints<0.]+=bs
+#ranpoints[ranpoints>bs]-=bs
+#ranpoints[ranpoints<0.]+=bs
 
-    #########
-    #VOLUMIZE
-    #########
-#    dr_array =  np.zeros(np.shape(ranpoints))
-#    for i in range(nran):
+#voro = pyvoro.compute_voronoi(ranpoints,limits,msep)#,periodic=[True,True,True])
 
-#        dr = rbar - ((3*voro[i]['volume'])/(4*np.pi))**(1./nd)
-            
-#        for face in voro[i]['faces']:
-#            idx = face['adjacent_cell']
-#            if idx==i: continue
-#            dist = ranpoints[idx]-ranpoints[i]
-#            r_ij = dist/np.linalg.norm(dist)
-#            dr_array[idx] = dr_array[idx] + smooth*dr*r_ij
-            #print i,idx,dist,r_ij,dr_array[idx]
-    
-#    norm[_] = np.mean(np.linalg.norm(dr_array,axis=1))
-    
-#    ranpoints += dr_array
-
-#    ranpoints[ranpoints>bs]-=bs
-#    ranpoints[ranpoints<0.]+=bs
-
-#    voro = pyvoro.compute_voronoi(ranpoints,limits,1.5*msep,periodic=[True,True,True])
-
-    ### Para ver como cambia el Pk con las iteraciones
-#    if _ in [10,20,30,40,50,60,70,80,90]:
-#        dcat = ArrayCatalog(Table(ranpoints,names=['x','y','z']),BoxSize=bs)
-#        dcat['Position'] = transform.StackColumns(dcat['x'], dcat['y'], dcat['z'])
-
-#        real_mesh = dcat.to_mesh(compensated=True, window='tsc', position='Position', Nmesh=256)
-#        r = FFTPower(real_mesh, mode='1d',dk=0.005)
-#        Pk = r.power
-
-#        plt.loglog(Pk['k'], Pk['power'].real,label='niter={}'.format(_))# - Pk.attrs['shotnoise'])
-
-#--------------------------------------------------
 
 #t2 = time.time()
 
-#ascii.write(ranpoints,'volumized_cat/volumized_{}_{}.txt'.format(nran,niter),format='no_header',overwrite=True)
+#ascii.write(ranpoints,'../volumized_cat/volumized_{}_{}.txt'.format(nran,niter),format='no_header',overwrite=True)
 
 #print 'Time:',t2-t1
 
@@ -194,11 +172,11 @@ rcat = CSVCatalog('../data/ccvt_particle_16_capacity_40.txt',names=['x','y','z']
 rcat['Position'] = transform.StackColumns(rcat['x'], rcat['y'], rcat['z'])
 rcat['Position']*=bs
 real_mesh = rcat.to_mesh(compensated=True, window='tsc', position='Position', BoxSize=[bs,bs,bs],Nmesh=256)
-r = FFTPower(real_mesh, mode='1d',dk=0.005)
+r = FFTPower(real_mesh, mode='1d',dk=dk)
 Pkccvt = r.power
 
 ccvt_points = rcat['Position'].compute()
-ccvt_voro = pyvoro.compute_voronoi(ccvt_points,limits,1.5*msep,periodic=[True,True,True])
+ccvt_voro = pyvoro.compute_voronoi(ccvt_points,limits,msep,periodic=[True,True,True])
 ccvt_vol=[v.get('volume') for v in ccvt_voro]
 
 ################
@@ -210,11 +188,11 @@ gcat = CSVCatalog('../data/glass_16.dat',names=['x','y','z'])
 gcat['Position'] = transform.StackColumns(gcat['x'], gcat['y'], gcat['z'])
 gcat['Position']*=bs
 real_mesh = gcat.to_mesh(compensated=True, window='tsc', position='Position', BoxSize=[bs,bs,bs],Nmesh=256)
-r = FFTPower(real_mesh, mode='1d',dk=0.005)
+r = FFTPower(real_mesh, mode='1d',dk=dk)
 Pkglass = r.power
 
 gpoints = gcat['Position'].compute()
-gvoro = pyvoro.compute_voronoi(gpoints,limits,1.5*msep,periodic=[True,True,True])
+gvoro = pyvoro.compute_voronoi(gpoints,limits,msep,periodic=[True,True,True])
 gvol=[v.get('volume') for v in gvoro]
 
 ################
@@ -234,12 +212,15 @@ plt.scatter(points1[:,0],points1[:,1],alpha=.4,label='Original')
 plt.legend()
 plt.show()
 
+plt.scatter(ranpoints[:,0],ranpoints[:,1])
+plt.show()
+
 print 'Calculating P(k) - After'   
 dcat = ArrayCatalog(Table(ranpoints,names=['x','y','z']),BoxSize=bs)
 dcat['Position'] = transform.StackColumns(dcat['x'], dcat['y'], dcat['z'])
 
 real_mesh = dcat.to_mesh(compensated=True, window='tsc', position='Position', Nmesh=256)
-r = FFTPower(real_mesh, mode='1d',dk=0.005)
+r = FFTPower(real_mesh, mode='1d',dk=dk)
 Pk2 = r.power
 
 plt.loglog(Pk1['k'], Pk1['power'].real,label='Before')# - Pk.attrs['shotnoise'])
@@ -252,8 +233,22 @@ plt.vlines(2.*np.pi/msep,10,10E9,colors='k',linestyles=':')
 plt.legend()
 plt.show()
 
-plt.plot(range(niter),norm,label=r'$\Delta r$')
-plt.yscale('log')
-plt.xscale('log')
+#Ratio of Pk/Pk_ran
+min = np.min(Pk2['power'].real/Pk1['power'].real)
+plt.hlines(min,Pk1['k'][0],Pk2['k'][-1],linestyle='-',label='Min = {}'.format(min))
+
+#plt.loglog(Pk1['k'], Pk1['power'].real,label='Before')# - Pk.attrs['shotnoise'])
+plt.loglog(Pk2['k'], Pk2['power'].real/Pk1['power'].real,label='After')# - Pk.attrs['shotnoise'])
+plt.loglog(Pkccvt['k'], Pkccvt['power'].real/Pk1['power'].real,label='CCVT')
+plt.loglog(Pkglass['k'], Pkglass['power'].real/Pk1['power'].real,label='Glass')
+plt.hlines(1., Pk1['k'][0],Pk2['k'][-1], colors='k',linestyles=':')
+#plt.loglog(Pk2['k'],((bs**3/nran)*(Pk2['k']*msep/(2.*np.pi))**4),color='k',ls=':') 
 plt.legend()
 plt.show()
+
+#if volumize==True:
+#    plt.plot(range(niter),norm,label=r'$\Delta r$')
+#    plt.yscale('log')
+#    plt.xscale('log')
+#    plt.legend()
+#    plt.show()
