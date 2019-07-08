@@ -12,11 +12,12 @@ from astropy import table
 from astropy.table import Table
 import pyvoro
 from nbodykit.lab import *
+import time
 
 recenter = True
-volumize = False
+volumize = True
 periodicVoro = False
-smooth = .25 #se usa en el volumizado 
+smooth = .7 #se usa en el volumizado 
 
 niter=200
 
@@ -91,29 +92,29 @@ for _ in range(niter):
         #########
         #VOLUMIZE
         #########
-        f_array = np.zeros(np.shape(ranpoints))
+        #f_array = np.zeros(np.shape(ranpoints))
+        f_array = np.zeros((np.shape(ranpoints[0])))
         dr_array = np.zeros(np.shape(ranpoints))
         for i in range(nran):
 
             for face in voro[i]['faces']:
                 j = face['adjacent_cell']
+                if j<0: continue #negative adjacent cell means it's a wall
                 if j==i: continue
                 dist = ranpoints[j]-ranpoints[i]
                 
                 dr = np.linalg.norm(dist)-msep
-                
-                if np.linalg.norm(dist)==0.: 
-                    print 'Dist es 0! i:',i,' j:',j
-                    continue
-                
+                                
                 #if dr<0.: neg+=1
                 #if dr>0.: pos+=1
                 #print dr
                 r_ij = dist/np.linalg.norm(dist)
                 #f_array[i] += smooth*dr*r_ij #lo reemplace por una sola f, para cambiar la posicion una por una
+                #f_array += smooth*dr*r_ij
                 f = smooth*dr*r_ij
                 #print i,idx,dist,r_ij,dr_array[idx]
 
+            #ranpoints[i] += f_array
             ranpoints[i] += f
             if np.any(np.isnan(ranpoints[i]))==True:
                 print 'nan',i
@@ -125,9 +126,8 @@ for _ in range(niter):
 
         #ranpoints += dr_array #lo reemplaze por el 'ranpoints[i] += f' mas arriba
 
-
+        #Check if there are particles outside of box
         print 'Percentage of Out Of Box Particles:',(len(ranpoints[ranpoints>bs])+len(ranpoints[ranpoints<0.]))*100/len(ranpoints),'%'
-
         ranpoints[ranpoints>bs]-=bs
         ranpoints[ranpoints<0.]+=bs
 
@@ -223,18 +223,19 @@ real_mesh = dcat.to_mesh(compensated=True, window='tsc', position='Position', Nm
 r = FFTPower(real_mesh, mode='1d',dk=dk)
 Pk2 = r.power
 
-plt.loglog(Pk1['k'], Pk1['power'].real,label='Before')# - Pk.attrs['shotnoise'])
-plt.loglog(Pk2['k'], Pk2['power'].real,label='After')# - Pk.attrs['shotnoise'])
-plt.loglog(Pkccvt['k'], Pkccvt['power'].real,label='CCVT')
-plt.loglog(Pkglass['k'], Pkglass['power'].real,label='Glass')
-plt.loglog(Pk2['k'],((bs**3/nran)*(Pk2['k']*msep/(2.*np.pi))**4),color='k',ls=':') 
-plt.hlines((bs**nd)/nran, Pk1['k'][0],Pk2['k'][-1], colors='k',linestyles=':')
-plt.vlines(2.*np.pi/msep,10,10E9,colors='k',linestyles=':')
-plt.legend()
-plt.show()
+#plt.loglog(Pk1['k'], Pk1['power'].real,label='Before')# - Pk.attrs['shotnoise'])
+#plt.loglog(Pk2['k'], Pk2['power'].real,label='After')# - Pk.attrs['shotnoise'])
+#plt.loglog(Pkccvt['k'], Pkccvt['power'].real,label='CCVT')
+#plt.loglog(Pkglass['k'], Pkglass['power'].real,label='Glass')
+#plt.loglog(Pk2['k'],((bs**3/nran)*(Pk2['k']*msep/(2.*np.pi))**4),color='k',ls=':') 
+#plt.hlines((bs**nd)/nran, Pk1['k'][0],Pk2['k'][-1], colors='k',linestyles=':')
+#plt.vlines(2.*np.pi/msep,10,10E9,colors='k',linestyles=':')
+#plt.legend()
+#plt.show()
 
 #Ratio of Pk/Pk_ran
 min = np.min(Pk2['power'].real/Pk1['power'].real)
+print min
 plt.hlines(min,Pk1['k'][0],Pk2['k'][-1],linestyle='-',label='Min = {}'.format(min))
 
 #plt.loglog(Pk1['k'], Pk1['power'].real,label='Before')# - Pk.attrs['shotnoise'])
@@ -242,9 +243,28 @@ plt.loglog(Pk2['k'], Pk2['power'].real/Pk1['power'].real,label='After')# - Pk.at
 plt.loglog(Pkccvt['k'], Pkccvt['power'].real/Pk1['power'].real,label='CCVT')
 plt.loglog(Pkglass['k'], Pkglass['power'].real/Pk1['power'].real,label='Glass')
 plt.hlines(1., Pk1['k'][0],Pk2['k'][-1], colors='k',linestyles=':')
+plt.vlines(2.*np.pi/msep,10E-6,10,colors='k',linestyles=':',label='Mean Sep.')
+plt.vlines(2.*np.pi/bs,10E-6,10,colors='k',linestyles=':',label='Box Size')
+
 #plt.loglog(Pk2['k'],((bs**3/nran)*(Pk2['k']*msep/(2.*np.pi))**4),color='k',ls=':') 
 plt.legend()
 plt.show()
+
+
+#Write Results
+#results = {'min':[min], \
+#           'recenter':[recenter], \
+#           'volumize':[volumize], \
+#           'smooth':[smooth], \
+#           'niter':[niter], \
+#           'pk':[Pk2['power'].real], \
+#           'k':[Pk2['k']]} 
+#results_t=Table(results)
+#ascii.write(Table(results),'Results_{}.txt'.format(time.ctime()))
+#f = open('Results_{}.txt'.format(time.ctime()),"w")
+#f.write( str(results) )
+#f.close()
+
 
 #if volumize==True:
 #    plt.plot(range(niter),norm,label=r'$\Delta r$')
