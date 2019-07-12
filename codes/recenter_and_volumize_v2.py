@@ -15,11 +15,11 @@ from nbodykit.lab import *
 import time
 
 recenter = True
-volumize = True
+volumize = False
 periodicVoro = False
-smooth = .7 #se usa en el volumizado 
+smooth = .2 #se usa en el volumizado 
 
-niter=200
+niter=20
 
 nd = 3
 nran = 16**3
@@ -29,8 +29,8 @@ msep = (bs**nd/nran)**(1./nd)
 dk = 0.007
 
 #TEST multiplico la separacion media para usarla en la teselacion Voronoi
-msep *= np.sqrt(2)
-
+#msep *= np.sqrt(2)
+msep *= 1.2
 
 rbar = (3.*bs**nd/(4.*np.pi*nran))**(1./3)
 
@@ -63,8 +63,8 @@ norm = np.zeros(niter)
 
 
 #test
-neg=0
-pos=0
+#neg=0
+#pos=0
 
 for _ in range(niter): 
     print _,'/',niter-1
@@ -100,7 +100,7 @@ for _ in range(niter):
             for face in voro[i]['faces']:
                 j = face['adjacent_cell']
                 if j<0: continue #negative adjacent cell means it's a wall
-                if j==i: continue
+                #if j==i: continue
                 dist = ranpoints[j]-ranpoints[i]
                 
                 dr = np.linalg.norm(dist)-msep
@@ -112,10 +112,12 @@ for _ in range(niter):
                 #f_array[i] += smooth*dr*r_ij #lo reemplace por una sola f, para cambiar la posicion una por una
                 #f_array += smooth*dr*r_ij
                 f = smooth*dr*r_ij
+                print 'f:',f
                 #print i,idx,dist,r_ij,dr_array[idx]
 
             #ranpoints[i] += f_array
             ranpoints[i] += f
+            print 'f being summed:',f
             if np.any(np.isnan(ranpoints[i]))==True:
                 print 'nan',i
             
